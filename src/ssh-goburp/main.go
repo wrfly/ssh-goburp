@@ -37,7 +37,6 @@ func main() {
 	)
 
 	if *username == "" || *password == "" || *targethost == "" || *targetport < 0 {
-		log.Info("username")
 		flag.Usage()
 		os.Exit(1)
 	}
@@ -50,13 +49,13 @@ func main() {
 	}
 	log.Infof("Target is %s:%d", target.Host, target.Port)
 
-	if !PathExist(*username) {
+	if !pathExist(*username) {
 		usernames = append(usernames, *username)
 	} else {
 		usernames = readFile(*username)
 	}
 
-	if !PathExist(*password) {
+	if !pathExist(*password) {
 		passwords = append(passwords, *password)
 	} else {
 		passwords = readFile(*password)
@@ -73,6 +72,11 @@ func main() {
 	passwd := make(chan string, 1)
 	total := len(usernames) * len(passwords)
 	for u := 0; u < len(usernames); u++ {
+		if <-success == 1 {
+			success <- 1
+			break
+		}
+		success <- 0
 		for p := 0; p < len(passwords); p++ {
 			auth := handler.Auth{
 				User: usernames[u],
@@ -83,30 +87,7 @@ func main() {
 				break
 			}
 			success <- 0
-			go func(auth handler.Auth, success chan int, tries chan int, passwd chan string) {
-				if <-success == 1 {
-					success <- 1
-					return
-				}
-				success <- 0
-				if target.Try(auth) {
-					log.Info(time.Now())
-					log.Infof("Auth [%v] Connected!", auth)
-					<-success
-					success <- 1
-					passwd <- auth.Pass
-					return
-				}
-				t := <-tries
-				if t == total {
-					log.Error("Password not found.")
-					<-success
-					success <- 1
-					passwd <- "Password not found."
-					return
-				}
-				tries <- t + 1
-			}(auth, success, tries, passwd)
+			go burp(auth, success, tries, passwd)
 			time.Sleep(25000 * time.Microsecond)
 		}
 	}
@@ -122,7 +103,7 @@ func main() {
 
 }
 
-func PathExist(path string) bool {
+func pathExist(path string) bool {
 	_, err := os.Stat(path)
 	if err != nil && os.IsNotExist(err) {
 		return false
@@ -143,4 +124,29 @@ func readFile(filename string) []string {
 	}
 	f.Close()
 	return appendTo
+}
+
+func burp(auth handler.Auth, success chan int, tries chan int, passwd chan string) {
+	if <-success == 1 {
+		success <- 1
+		return
+	}
+	success <- 0
+	if target.Try(auth) {
+		log.Info(time.Now())
+		log.Infof("Auth [%v] Connected!", auth)
+		<-success
+		success <- 1
+		passwd <- auth.Pass
+		return
+	}
+	t := <-tries
+	if t == total {
+		log.Error("Password not found.")
+		<-success
+		success <- 1
+		passwd <- "Password not found."
+		return
+	}
+	tries <- t + 1
 }
