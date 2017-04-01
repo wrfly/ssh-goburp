@@ -61,9 +61,10 @@ func main() {
 		passwords = readFile(*password)
 	}
 
-	log.Infof("Load [%v] passwords", len(passwords))
+	log.Infof("Load [%v] Usernames", len(usernames))
+	log.Infof("Load [%v] Passwords", len(passwords))
 	stime := time.Now()
-	log.Infof("Starting at %v", stime)
+	log.Infof("Starting at %v", time.Now())
 
 	tries := make(chan int, 1)
 	tries <- 1
@@ -87,7 +88,31 @@ func main() {
 				break
 			}
 			success <- 0
-			go burp(auth, success, tries, passwd)
+			go func(auth handler.Auth, success chan int,
+				tries chan int, passwd chan string) {
+				if <-success == 1 {
+					success <- 1
+					return
+				}
+				success <- 0
+				if target.Try(auth) {
+					log.Info(time.Now())
+					log.Infof("Auth [%v] Connected!", auth)
+					<-success
+					success <- 1
+					passwd <- auth.Pass
+					return
+				}
+				t := <-tries
+				if t == total {
+					log.Error("Password not found.")
+					<-success
+					success <- 1
+					passwd <- "Password not found."
+					return
+				}
+				tries <- t + 1
+			}(auth, success, tries, passwd)
 			time.Sleep(25000 * time.Microsecond)
 		}
 	}
@@ -120,33 +145,11 @@ func readFile(filename string) []string {
 		if err == io.EOF {
 			break
 		}
-		appendTo = append(appendTo, string(line))
+		l := string(line)
+		if l != "" {
+			appendTo = append(appendTo, l)
+		}
 	}
 	f.Close()
 	return appendTo
-}
-
-func burp(auth handler.Auth, success chan int, tries chan int, passwd chan string) {
-	if <-success == 1 {
-		success <- 1
-		return
-	}
-	success <- 0
-	if target.Try(auth) {
-		log.Info(time.Now())
-		log.Infof("Auth [%v] Connected!", auth)
-		<-success
-		success <- 1
-		passwd <- auth.Pass
-		return
-	}
-	t := <-tries
-	if t == total {
-		log.Error("Password not found.")
-		<-success
-		success <- 1
-		passwd <- "Password not found."
-		return
-	}
-	tries <- t + 1
 }
